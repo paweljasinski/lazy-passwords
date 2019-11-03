@@ -3,7 +3,7 @@ Arduino based keyboard/mouse emulator to block screen saver and store/enter pass
 
 lazy-password performs 2 functions:
 * It tries to stop the usual corporate screen saver from locking your session.
-* It let you enter quickly pre recorded passwords as they would be typed from a keybord.
+* It let you enter quickly pre recorded passwords as they would be typed from a keyboard.
 
 
 
