@@ -41,5 +41,13 @@ and execute on command line:
 sudo sh -c 'cat p0.txt > /dev/ttyACM0'
 ```
 
+## Keyboard
+lazy-password includes support for 2 keyboard layouts, US and Swiss German. The keyboard layout can
+be switched as needed.
+
 ## Security consideration:
 The passwords are stored unprotected in EEPROM and can be dumped using standard atmega tools.
+
+## Building
+Standard Keyboard and HID require modifications to support CapsLock tracking and non-US keyboard layout.
+You have to apply HID and Keyboard patches before sketch can be compiled and uploaded.
