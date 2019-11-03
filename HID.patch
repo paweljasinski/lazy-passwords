@@ -1,0 +1,52 @@
+diff --git a/hardware/arduino/avr/libraries/HID/src/HID.cpp b/hardware/arduino/avr/libraries/HID/src/HID.cpp
+index 21ede26..5ecffc1
+--- a/hardware/arduino/avr/libraries/HID/src/HID.cpp
++++ b/hardware/arduino/avr/libraries/HID/src/HID.cpp
+@@ -133,6 +133,15 @@ bool HID_::setup(USBSetup& setup)
+ 		}
+ 		if (request == HID_SET_REPORT)
+ 		{
++			if (setup.wLength == 2)
++			{
++				uint8_t data[2];
++				if (2 == USB_RecvControl(data, 2)) 
++				{
++					_keyboardLedsStatus = data[1];
++					return true;
++				}
++			}
+ 			//uint8_t reportID = setup.wValueL;
+ 			//uint16_t length = setup.wLength;
+ 			//uint8_t data[length];
+@@ -146,6 +155,11 @@ bool HID_::setup(USBSetup& setup)
+ 	return false;
+ }
+ 
++uint8_t HID_::getKeyboardLedsStatus(void)
++{
++	return _keyboardLedsStatus;
++}
++
+ HID_::HID_(void) : PluggableUSBModule(1, 1, epType),
+                    rootNode(NULL), descriptorSize(0),
+                    protocol(HID_REPORT_PROTOCOL), idle(1)
+diff --git a/hardware/arduino/avr/libraries/HID/src/HID.h b/hardware/arduino/avr/libraries/HID/src/HID.h
+index 93c4bd5..e48e718
+--- a/hardware/arduino/avr/libraries/HID/src/HID.h
++++ b/hardware/arduino/avr/libraries/HID/src/HID.h
+@@ -95,6 +95,7 @@ public:
+   int begin(void);
+   int SendReport(uint8_t id, const void* data, int len);
+   void AppendDescriptor(HIDSubDescriptor* node);
++  uint8_t getKeyboardLedsStatus(void);
+ 
+ protected:
+   // Implementation of the PluggableUSBModule
+@@ -111,6 +112,7 @@ private:
+ 
+   uint8_t protocol;
+   uint8_t idle;
++  uint8_t _keyboardLedsStatus;
+ };
+ 
+ // Replacement for global singleton.
