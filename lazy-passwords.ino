@@ -27,22 +27,32 @@
 #include <Mouse.h>
 #include <EEPROM.h>
 
-#include "unlock_code.h"
-#include "labels.h"
 
+// uncomment if needed
 // #define INCLUDE_DUMP_EEPROM
 
 const byte LED1 = LED_BUILTIN;
 const byte LED2 = LED_BUILTIN_RX;
 const byte LED3 = LED_BUILTIN_TX;
 const char SPACE = ' ';
-// LCD
+
+
+/******************************************************************************
+
+    LCD 1602
+
+*******************************************************************************/
 const byte LCD_COLS = 16;
 const byte LCD_ROWS = 2;
 const byte PIN_RS = 8, PIN_EN = 9, PIN_D4 = 4, PIN_D5 = 5, PIN_D6 = 6, PIN_D7 = 7, PIN_BL = 10;
 LiquidCrystal lcd(PIN_RS,  PIN_EN,  PIN_D4,  PIN_D5,  PIN_D6,  PIN_D7);
 
 
+/******************************************************************************
+
+    Rotary Encoder
+
+*******************************************************************************/
 // Working variables for the rotary encoder interrupt routines
 volatile byte int0signal = 0;
 volatile byte int1signal = 0;
@@ -61,43 +71,76 @@ volatile byte dropped = 0;
 // CLK
 const byte PIN_A = 1, BIT_A = 3, INT_A = 3;
 #define PORT_A PIND
-
 // DATA
 const byte PIN_B = 2, BIT_B = 1, INT_B = 1;
 #define PORT_B PIND
-
 // SW
 const byte KEY = 3, BIT_KEY = 0, INT_KEY = 0;
 #define PORT_KEY PIND
-
 // key up and key down events for rotary build in switch
 const byte KEY_DOWN = 0x80;
-
 #ifdef GENERATE_KEY_UP
 const byte KEY_UP   = 0x40;
 #endif
 
-const byte N_PASS = 5; // number of passwords
-const byte PASSWORDS_EEPROM_BASE_ADDR = 16;
-const byte PASSWORD_MAX_LEN = 48; // we waste last byte in eeprom to store \0 so it is 47
-
-const byte EEPROM_MOUSE_DELTA_ADDR = 4; // persist mouse jump value
-const byte MOUSE_DELTA_INIT_VALUE = 5;  // default value used when eeprom is not initialized
-int8_t mouse_delta; // how much mouse is moved
-unsigned long next_screen_saver_action; // millis when we need next key/mouse
-unsigned long end_of_mouse_calibration; // millis when to stop calibrating
-
-const int16_t CALIBRATION_TIMEOUT = 5000; // ms, 5 secons of no activity during mouse calibration
-
-unsigned long now; // holds value returned by last call to millis
-
 byte shifter; // collect rotary clk/data bits, 4 x 2 bits
 const byte ROTARY_EVENT_MASK = 0x0F; // only 4 bits get into event
 
+/******************************************************************************
+
+    Label and password
+
+*******************************************************************************/
+const byte N_PASS = 5; // number of passwords/labels
+const byte LABEL_BASE_ADDR = 16; // EEPROM
+const byte PASSWORDS_EEPROM_BASE_ADDR = LABEL_BASE_ADDR + LCD_COLS * N_PASS;
+const byte PASSWORD_MAX_LEN = 48;
+
+/******************************************************************************
+
+    Mouse and screen saver
+
+*******************************************************************************/
+const byte EEPROM_MOUSE_DELTA_ADDR = 4; // persist mouse jump value
+const byte MOUSE_DELTA_INIT_VALUE = 5;  // default value used when eeprom is not initialized
+int8_t mouse_delta; // how much mouse is moved
+uint32_t next_screen_saver_action; // millis when we need next key/mouse
+uint32_t end_of_mouse_calibration; // millis when to stop calibrating
+const int16_t CALIBRATION_TIMEOUT = 5000; // ms, 5 secons of no activity during mouse calibration
+
+/******************************************************************************
+
+    PIN
+
+*******************************************************************************/
+const byte PIN_ADDR = 5; // pin in EEPROM
+const byte PIN_SIZE = 5;
+
+/******************************************************************************
+
+    KEYBOARD LAYOUT
+
+*******************************************************************************/
+const byte KEYBOARD_LAYOUT_ADDR = PIN_ADDR + PIN_SIZE;
+const byte N_LAYOUT = 2;
+const byte EN_US_LAYOUT = 0;
+const byte DE_CH_LAYOUT = 1;
+byte layout; // track current layout
+
+
+uint32_t now; // holds value returned by last call to millis
+
+/******************************************************************************
+
+    STATE
+
+*******************************************************************************/
+const byte CHANGE_PIN_STATE  = 3;
 const byte CALIBRATION_STATE = 2;
-const byte OPERATION_STATE   = 1;
+const byte MENU_STATE        = 1;
 const byte LOCKED_STATE      = 0;
 byte state = LOCKED_STATE;
+
 
 void setup() {
 
@@ -126,10 +169,84 @@ void setup() {
     Mouse.begin();
     Serial.begin(115200);
     // delay(2000);
+    start_locked();
+    eeprom_one_time_init();
+    mouse_delta = EEPROM.read(EEPROM_MOUSE_DELTA_ADDR);
+    layout = EEPROM.read(KEYBOARD_LAYOUT_ADDR);
 }
 
 
+/*
+    If this is first time use of EEPROM, initialize it
+*/
+void eeprom_one_time_init() {
+    uint16_t addr = 0;
+    if (EEPROM.read(addr++) == 's' &&
+        EEPROM.read(addr++) == 's' &&
+        EEPROM.read(addr++) == 'k' &&
+        EEPROM.read(addr++) == '1') {
+            return;
+    }
+    // one time init
+    addr = 0;
+    EEPROM.write(addr++, 's'); // screen
+    EEPROM.write(addr++, 's'); // saver
+    EEPROM.write(addr++, 'k'); // killer
+    EEPROM.write(addr++, '1'); // version 1
+    EEPROM.write(addr++, MOUSE_DELTA_INIT_VALUE);
+    EEPROM.write(addr++, 0xff); // PIN
+    EEPROM.write(addr++, 0xff); // PIN
+    EEPROM.write(addr++, 0xff); // PIN
+    EEPROM.write(addr++, 0xff); // PIN
+    EEPROM.write(addr++, 0x00); // PIN
+    EEPROM.write(addr++, EN_US_LAYOUT); // Keyboard layout
+}
+
+/******************************************************************************
+
+    Util
+
+*******************************************************************************/
+uint32_t short_message_cleanup = 0; // when to remove short message
+void show_short_message(const char * const msg) {
+    clean_short_message();
+    lcd.setCursor(LCD_COLS - 3, LCD_ROWS - 1);
+    lcd.print(msg);
+    short_message_cleanup = millis() + 3000;
+    // Serial.println(msg);
+}
+
+void clean_short_message() {
+    lcd.setCursor(LCD_COLS - 3, LCD_ROWS - 1);
+    lcd.print("   ");
+}
+
+void process_short_message_cleanup() {
+    if (0 == short_message_cleanup) {
+        return;
+    }
+    if (short_message_cleanup < millis()) {
+        short_message_cleanup = 0;
+        clean_short_message();
+        lcd.setCursor(0, 0);
+    }
+}
+
+void lcd_print_padded_byte(byte n) {
+    if (n < 0x10) {
+        lcd.print('0');
+    }
+    lcd.print(n, HEX);
+}
+
+
+/******************************************************************************
+
+    Interrupts
+
+*******************************************************************************/
 void int0() {
+    // CLK
     int0history = int0signal;
     int0signal = bitRead(PORT_A, BIT_A);
     if (int0history == int0signal) {
@@ -141,6 +258,7 @@ void int0() {
 }
 
 void int1() {
+    // DATA
     int1history = int1signal;
     int1signal = bitRead(PORT_B, BIT_B);
     if (int1history == int1signal) {
@@ -153,7 +271,8 @@ void int1() {
 
 const byte KEY_DEBOUNCE = 50; // ms
 void int2() {
-    static unsigned long last_key_interrupt_time = 0;
+    // KEY
+    static uint32_t last_key_interrupt_time = 0;
     static int key_down = 0;
     now = millis();
     if (now - last_key_interrupt_time > KEY_DEBOUNCE) {
@@ -210,6 +329,28 @@ byte deque(byte * out, byte n) {
 }
 
 
+
+// index into table is constructed from DATA << 1 | CLK of the rotary
+const int8_t rot_enc_table[] = {0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0};
+
+void mark_encoding_error() {
+    // never got here
+    show_short_message("ERE");
+}
+
+/*
+    translate rotary event to delta
+    returns either -1, 1, or 0
+*/
+byte rotary_delta(byte event) {
+    int8_t delta = rot_enc_table[event];
+    if (!delta) {
+        mark_encoding_error();
+    }
+    return delta;
+}
+
+
 /*
     type n'th password
 */
@@ -218,35 +359,11 @@ void send_password(byte n) {
     uint16_t src_addr = PASSWORDS_EEPROM_BASE_ADDR + n * PASSWORD_MAX_LEN;
     uint16_t end_addr = src_addr + PASSWORD_MAX_LEN;
     byte c;
-    do {
-        c = EEPROM.read(src_addr++);
+    while (src_addr != end_addr && 0 != (c = EEPROM.read(src_addr++))) {
         Keyboard.press(c);
         Keyboard.releaseAll();
-    } while (c != 0 && src_addr != end_addr);
+    };
 }
-
-/*
-    Retrieve mouse delta
-    If this is first time use of EEPROM, initialize it
-*/
-int get_mouse_delta() {
-    char id[4];
-    for (int addr = 0; addr < 4; addr++) {
-        id[addr] = EEPROM.read(addr);
-    }
-    if (strncmp(id, "ssk1", 4) != 0) {
-        // one time init
-        EEPROM.write(0, 's'); // screen
-        EEPROM.write(1, 's'); // saver
-        EEPROM.write(2, 'k'); // killer
-        EEPROM.write(3, '1'); // version 1 stores mouse delta
-        EEPROM.write(EEPROM_MOUSE_DELTA_ADDR, MOUSE_DELTA_INIT_VALUE);
-    }
-    return EEPROM.read(EEPROM_MOUSE_DELTA_ADDR);
-}
-
-// index into table is constrict from DATA << 1 | CLK of the rotary
-const int8_t rot_enc_table[] = {0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0};
 
 
 // this is a list which is periodically filled up from the circular buffer
@@ -257,64 +374,53 @@ byte events[EVENT_LST_SIZE];
 byte event_count;
 byte event;
 
+/******************************************************************************
+
+    LOOP
+
+*******************************************************************************/
 void loop() {
     if (state == CALIBRATION_STATE) {
         calibration_loop();
-    } else if (state == OPERATION_STATE) {
-        shortcuts_loop();
+    } else if (state == MENU_STATE) {
+        screen_saver();
+        process_shortcut_events();
+        process_config_update();
+        process_short_message_cleanup();
+    } else if (state == CHANGE_PIN_STATE) {
+        change_pin_loop();
     } else {
-        unlock_loop();
-    }
-}
-
-void shortcuts_loop() {
-    screen_saver();
-    process_shortcut_events();
-    process_password_update();
-}
-
-unsigned long KEY_UP_DELAY = 5; // ms
-unsigned long SCREEN_SAVER_TIMEOUT = 58000; // ms, just under a minute
-
-void screen_saver() {
-    now = millis();
-    if (now > next_screen_saver_action) {
-        mouse_delta = -mouse_delta;
-        Mouse.move(mouse_delta, 0, 0);
-        Keyboard.press(KEY_RIGHT_SHIFT);
-        delay(KEY_UP_DELAY);
-        Keyboard.release(KEY_RIGHT_SHIFT);
-        next_screen_saver_action = now + KEY_UP_DELAY + SCREEN_SAVER_TIMEOUT;
+        locked_loop();
     }
 }
 
 
-const byte N_LAYOUT = 2;
-const byte EN_US_LAYOUT = 0;
-const byte DE_CH_LAYOUT = 1;
-byte layout = EN_US_LAYOUT; // track currnt layout
 
 #ifdef INCLUDE_DUMP_EEPROM
-const byte N_LABELS = N_PASS + N_LAYOUT + 1;
+const byte N_LABELS = N_PASS + N_LAYOUT + 2;
 #else
-const byte N_LABELS = N_PASS + N_LAYOUT;
+const byte N_LABELS = N_PASS + N_LAYOUT + 1;
 #endif
 
 
-const char labels[N_LABELS][LCD_COLS + 1] = { PASS0_LABEL, PASS1_LABEL, PASS2_LABEL, PASS3_LABEL, PASS4_LABEL,
-                                              "US Layout", "Swiss Layout"
+const char static_labels[N_LABELS - N_PASS][13] = { "US Layout", "Swiss Layout", "Change Pin"
 #ifdef INCLUDE_DUMP_EEPROM
-                                              , "dump eeprom"
+                                                    , "dump eeprom"
 #endif
-                                            };
+                                                  };
 
+/******************************************************************************
+
+    MENU_STATE
+
+*******************************************************************************/
 int8_t pos = 0;                         // possition of the rotary
 int8_t last_pos = -1;                   // track change, trigger initial update
 
-void mark_encoding_error() {
-    // never got here
-    lcd.setCursor(5, 1);
-    lcd.print('E');
+void start_menu() {
+    state = MENU_STATE;
+    lcd.clear();
+    update_display();
 }
 
 void process_shortcut_events() {
@@ -328,9 +434,13 @@ void process_shortcut_events() {
                 } else if (pos < N_PASS + N_LAYOUT) {
                     layout = pos - N_PASS;
                     Keyboard.switchLayout(layout);
+                    EEPROM.write(KEYBOARD_LAYOUT_ADDR, layout);
+                } else if (pos == N_PASS + N_LAYOUT) {
+                    start_change_pin();
+                    return;
 #ifdef INCLUDE_DUMP_EEPROM
                 } else {
-                    dump_eeprom(32 * 8);
+                    dump_eeprom(PASSWORDS_EEPROM_BASE_ADDR + N_PASS * PASSWORD_MAX_LEN);
 #endif
                 }
                 update_display();
@@ -338,13 +448,7 @@ void process_shortcut_events() {
             } else if (event & KEY_UP) {
 #endif
             } else {
-                // everything else is rotary event
-                int8_t delta = rot_enc_table[event];
-                if (delta) {
-                    pos += delta;
-                } else {
-                    mark_encoding_error();
-                }
+                pos += rotary_delta(event);
             }
         }
     }
@@ -366,77 +470,170 @@ void process_shortcut_events() {
 char layout_labels[2][6] = {"en-US", "de-CH"};
 void update_display() {
     lcd.setCursor(0, 0);
-    const char * label = labels[pos];
-    lcd.print(label);
-    for (byte i = 0; i < LCD_COLS - strnlen(label, LCD_COLS); i++) {
-        lcd.write(SPACE);
+    const char * label;
+    if (pos < N_PASS) {
+        uint16_t addr = LABEL_BASE_ADDR + pos * LCD_COLS;
+        char lc;
+        byte i = 0;
+        while (0 != (lc = EEPROM.read(addr + i)) && i < LCD_COLS) {
+            lcd.write(lc);
+            i++;
+        }
+        for (byte j = LCD_COLS - i; j > 0; j--) {
+            lcd.write(SPACE);
+        }
+    } else {
+        label = static_labels[pos - N_PASS];
+        lcd.print(label);
+        for (byte i = 0; i < LCD_COLS - strnlen(label, LCD_COLS); i++) {
+            lcd.write(SPACE);
+        }
     }
     lcd.setCursor(0, 1);
     lcd.print(layout_labels[layout]);
 }
 
-void process_password_update() {
+
+/******************************************************************************
+
+    MENU_STATE / Screen Saver BLocker
+
+*******************************************************************************/
+
+uint32_t KEY_UP_DELAY = 5; // ms
+uint32_t SCREEN_SAVER_TIMEOUT = 58000; // ms, just under a minute
+
+void screen_saver() {
+    now = millis();
+    if (now > next_screen_saver_action) {
+        mouse_delta = -mouse_delta;
+        Mouse.move(mouse_delta, 0, 0);
+        Keyboard.press(KEY_RIGHT_SHIFT);
+        delay(KEY_UP_DELAY);
+        Keyboard.release(KEY_RIGHT_SHIFT);
+        next_screen_saver_action = now + KEY_UP_DELAY + SCREEN_SAVER_TIMEOUT;
+    }
+}
+
+
+const byte PREFIX_SIZE = 3; // cmd address comma
+const byte CMD_BUFFER_SIZE = PREFIX_SIZE + PASSWORD_MAX_LEN;
+
+/******************************************************************************
+
+    MENU_STATE / Configuration Update
+
+*******************************************************************************/
+void process_config_update() {
     if (!Serial.available()) {
         return;
     }
     // example content for update:
-    // 1:whatever\n\0
-    // 2:somethingelse\n\0
-    byte buffer[PASSWORD_MAX_LEN + 2];
+    // l0,label1\0
+    // l1,1234567890123456\0
+    //             1
+    // p0,something\n\0
+    // p1,123456789012345678901234567890123456789012345678\0
+    //             1         2         3         4
+    byte buffer[CMD_BUFFER_SIZE];
+    Serial.setTimeout(250);
     // The terminator character is discarded!
-    byte count = Serial.readBytesUntil('\0', buffer, PASSWORD_MAX_LEN + 2);
+    byte count = Serial.readBytesUntil('\0', buffer, CMD_BUFFER_SIZE);
     if (count == 0) {
-        return; // timeout, error or just a termination character
+        return;
     }
-    byte password_idx = buffer[0] - '0';
-    if (password_idx >= N_PASS) {
+    if (count < PREFIX_SIZE) {
+        show_short_message("E00");
+        return;
+    }
+    byte idx = buffer[1] - '0';
+    if (idx >= N_PASS) {
+        show_short_message("E01");
         return; // wrong index, ignore
     }
-    uint16_t dest_addr = PASSWORDS_EEPROM_BASE_ADDR + PASSWORD_MAX_LEN * password_idx;
+    byte end_count;
+    uint16_t dest_addr;
     byte i;
-    for (i = 0; i < count - 2; i++) {
-        EEPROM.update(dest_addr + i, buffer[2 + i]);
+    if (buffer[0] == 'p') { // password
+        dest_addr = PASSWORDS_EEPROM_BASE_ADDR + PASSWORD_MAX_LEN * idx;
+        end_count = PASSWORD_MAX_LEN;
+    } else if (buffer[0] == 'l') {
+        if (count > PREFIX_SIZE + LCD_COLS) {
+            show_short_message("E03");
+            return; // too many characters for label
+        }
+        dest_addr =  LABEL_BASE_ADDR + LCD_COLS * idx;
+        end_count = LCD_COLS;
+    } else {
+        show_short_message("E02");
+        return; // invalid command
     }
-    // zero rest of the password, add removed termination \0
-    for (byte j = i; j < PASSWORD_MAX_LEN; j++) {
+
+    for (i = 0; i < count - PREFIX_SIZE; i++) {
+        EEPROM.update(dest_addr + i, buffer[PREFIX_SIZE + i]);
+    }
+    // zero rest, in case of prefix only message it has an effect of erasing label or password
+    for (byte j = i; j < end_count; j++) {
         EEPROM.update(dest_addr + j, '\0');
     }
-    lcd.setCursor(0, 1);
-    lcd.print("updated ");
-    lcd.print(password_idx);
+
+    char msg[4];
+    msg[0] = SPACE;
+    msg[1] = buffer[0];
+    msg[2] = buffer[1];
+    msg[3] = '\0';
+    show_short_message(msg);
 }
 
-void lcdPrintPaddedByte(byte n) {
-    if (n < 0x10) {
-        lcd.print('0');
+
+/******************************************************************************
+
+    CHANGE_PIN_STATE
+
+*******************************************************************************/
+
+byte change_pin_number = 0;
+byte change_pin_code[PIN_SIZE];
+byte change_pin_count = 0;
+byte change_pin_last_number = 0;
+
+void start_change_pin() {
+    state = CHANGE_PIN_STATE;
+    change_pin_number = 0;
+    memset(change_pin_code, 0, PIN_SIZE);
+    change_pin_count = 0;
+    change_pin_last_number = 1; // trigger display update
+    lcd.clear();
+    lcd.print("Enter new pin");
+}
+
+void update_pin() {
+    for (byte i = 0; i < PIN_SIZE; i++) {
+        EEPROM.update(PIN_ADDR + i, change_pin_code[i]);
     }
-    lcd.print(n, HEX);
 }
 
-/*
-     unlock
-*/
-void unlock_loop() {
-    static byte number = 0;
-    static byte code[CODE_SIZE];
+void change_pin_loop() {
     while (0 != (event_count = deque(events, EVENT_LST_SIZE))) {
         // as long as there are events, process process process
         for (byte i = 0; i < event_count; i++) {
             event = events[i];
             if (event & KEY_DOWN) {
-                // shift codes
-                for (byte j = CODE_SIZE - 1; j > 0; j--) {
-                    code[j] = code[j - 1];
-                }
-                code[0] = number;
-                if (0 == memcmp(code, CODE, CODE_SIZE)) {
-                    state = CALIBRATION_STATE;
-                    lcd.clear();
-                    end_of_mouse_calibration = millis() + CALIBRATION_TIMEOUT;
-                    mouse_delta = get_mouse_delta();
-                    lcd.setCursor(0, 0);
-                    lcd.print("mouse calib: ");
-                    lcd.print(mouse_delta);
+                if (change_pin_count < PIN_SIZE) {
+                    change_pin_code[change_pin_count++] = change_pin_number;
+                    change_pin_last_number = !change_pin_number; // trigger refresh
+                    if (change_pin_count == PIN_SIZE) {
+                        lcd.setCursor(12, 0);
+                        lcd.print("    ");
+                        change_pin_number = 0; // cancel
+                        change_pin_last_number = 1; // force refresh
+                    }
+                } else {
+                    if (change_pin_number % 2) { // even is cancel, odd is ok
+                        // update pin
+                        update_pin();
+                    }
+                    start_menu();
                     return;
                 }
                 break;
@@ -445,39 +642,121 @@ void unlock_loop() {
                 // not much
 #endif
             } else {
-                // everything else is rotary event
-                int8_t delta = rot_enc_table[event];
-                if (delta) {
-                    number += delta;
-                } else {
-                    mark_encoding_error();
-                }
+                change_pin_last_number = change_pin_number;
+                change_pin_number += rotary_delta(event);
             }
         }
     }
-    lcd.setCursor(0, 0);
-    lcdPrintPaddedByte(number);
-    //lcd.print(number, HEX);
-    lcd.setCursor(0, 1);
-    for (int i = 0; i < CODE_SIZE; i++) {
-        lcdPrintPaddedByte(code[i]);
-        lcd.print(SPACE);
+    if (change_pin_number != change_pin_last_number) {
+        if (change_pin_count < PIN_SIZE) {
+            lcd.setCursor(change_pin_count * 3, 1);
+            lcd_print_padded_byte(change_pin_number);
+        } else {
+            lcd.setCursor(0, 0);
+            if (change_pin_number % 2) {
+                lcd.print(" Cancel >OK<");
+            } else {
+                lcd.print(">Cancel< OK ");
+            }
+        }
     }
 }
 
+/******************************************************************************
+
+    LOCKED_STATE
+
+*******************************************************************************/
+
+byte code[PIN_SIZE]; // pin entered by a user
+
+byte pin_match() {
+    for (int i = 0; i < PIN_SIZE; i++) {
+        if (code[i] != EEPROM.read(PIN_ADDR + i)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void start_locked() {
+    state = LOCKED_STATE;
+    lcd.clear();
+    lcd.print("Enter pin");
+}
 
 /*
-    calibration
+     unlock / enter pin
 */
-void calibration_loop() {
-    unsigned long now = millis();
-    static unsigned long last_move_mouse = 0;
+void locked_loop() {
+    static byte number = 0;
+    static byte count = 0;
+    static byte last_unlock_number = 1;
     while (0 != (event_count = deque(events, EVENT_LST_SIZE))) {
         // as long as there are events, process process process
         for (byte i = 0; i < event_count; i++) {
             event = events[i];
             if (event & KEY_DOWN) {
-                state = OPERATION_STATE;
+                if (count < PIN_SIZE) {
+                    code[count++] = number;
+                } else {
+                    code[PIN_SIZE - 1] = number;
+                }
+                if (count == PIN_SIZE) {
+                    if (pin_match()) {
+                        start_calibration();
+                        return;
+                    }
+                    // shift left
+                    for (byte i = 1; i < PIN_SIZE; i++) {
+                        code[i - 1] = code[i];
+                    }
+                    lcd.setCursor(0, 1);
+                    for (byte i = 0; i < PIN_SIZE; i++) {
+                        lcd_print_padded_byte(code[i]);
+                        lcd.print(" ");
+                    }
+                }
+#ifdef GENERATE_KEY_UP
+            } else if (event & KEY_UP) {
+                // not much
+#endif
+            } else {
+                last_unlock_number = number;
+                number += rotary_delta(event);
+            }
+        }
+    }
+    if (last_unlock_number != number) {
+        lcd.setCursor(count < PIN_SIZE ? count * 3 : (PIN_SIZE - 1) * 3, 1);
+        lcd_print_padded_byte(number);
+    }
+}
+
+/******************************************************************************
+
+    CALIBRATION_STATE
+
+*******************************************************************************/
+
+void start_calibration() {
+    state = CALIBRATION_STATE;
+    lcd.clear();
+    end_of_mouse_calibration = millis() + CALIBRATION_TIMEOUT;
+    lcd.setCursor(0, 0);
+    lcd.print("mouse calib: ");
+    lcd.print(mouse_delta);
+}
+
+void calibration_loop() {
+    uint32_t now = millis();
+    static uint32_t last_move_mouse = 0;
+    while (0 != (event_count = deque(events, EVENT_LST_SIZE))) {
+        // as long as there are events, process process process
+        for (byte i = 0; i < event_count; i++) {
+            event = events[i];
+            if (event & KEY_DOWN) {
+                state = MENU_STATE;
                 break;
 #ifdef GENERATE_KEY_UP
             } else if (event & KEY_UP) {
@@ -497,7 +776,7 @@ void calibration_loop() {
     }
 
     if (now > end_of_mouse_calibration) {
-        state = OPERATION_STATE; // end of calibration loop
+        state = MENU_STATE; // end of calibration loop
     }
     if (state == CALIBRATION_STATE) {
         lcd.setCursor(13, 0);
@@ -509,10 +788,17 @@ void calibration_loop() {
         }
     } else {
         lcd.clear();
+        // persist mouse delta
+        EEPROM.write(EEPROM_MOUSE_DELTA_ADDR, mouse_delta);
     }
 }
 
 
+/******************************************************************************
+
+    EEPROM_DUMP
+
+*******************************************************************************/
 
 #ifdef INCLUDE_DUMP_EEPROM
 
