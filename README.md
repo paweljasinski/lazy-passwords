@@ -64,9 +64,118 @@ The ```test``` directory contains numerous examples of files containing password
 lazy-password includes support for 2 keyboard layouts, US and Swiss German. The keyboard layout can
 be switched as needed. The default keyboard layout is preserved in EEPROM.
 
-## Security consideration:
-The passwords are stored unprotected in EEPROM and can be dumped using standard atmega tools.
-
 ## Building
 Standard Keyboard and HID require modifications to support CapsLock tracking and non-US keyboard layout.
 You have to apply HID and Keyboard patches before sketch can be compiled and uploaded.
+
+## Security consideration:
+The passwords are stored unprotected in EEPROM and can be dumped using standard atmega tools.
+However, with some effort you can protect access to EEPROM.
+
+First of all you need a ISP programmer. You can either buy one or [build one](https://www.arduino.cc/en/Tutorial/ArduinoISP) using spare Arduino.
+
+Once communication to lazy-password via ISP is established, it is time to do the real work.
+
+### Save content of flash
+```
+sudo avrdude -v -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -U flash:r:eeprom.flash:r
+```
+### Save content of EEPROM
+```
+sudo avrdude -v -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -U eeprom:r:eeprom.bin:r
+```
+### Check the fuses
+```
+sudo avrdude -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -t
+
+avrdude: AVR device initialized and ready to accept instructions
+
+Reading | ################################################## | 100% 0.02s
+
+avrdude: Device signature = 0x1e9587 (probably m32u4)
+avrdude> d lfuse
+>>> d lfuse 
+0000  ff                                                |.               |
+
+avrdude> d hfuse
+>>> d hfuse 
+0000  d8                                                |.               |
+
+avrdude> d efuse
+>>> d efuse 
+0000  cb                                                |.               |
+
+avrdude> d lock
+>>> d lock 
+0000  2f                                                |?               |
+
+avrdude> quit
+>>> quit 
+
+avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
+
+avrdude done.  Thank you.
+```
+The board I have is clone, so some values can be different. The most important bit to check is EESAVE in hfuse. It has to be inactive (1). 
+At this moment it is also a good idea to write down value of lock register (0x2f).
+
+### lock access to flash and EEPROM
+
+```
+sudo avrdude -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -t
+
+avrdude: AVR device initialized and ready to accept instructions
+
+Reading | ################################################## | 100% 0.02s
+
+avrdude: Device signature = 0x1e9587 (probably m32u4)
+avrdude> d lock
+>>> d lock 
+0000  2f                                                |?               |
+
+avrdude> w lock 0 0x2c
+>>> w lock 0 0x2c 
+
+avrdude> d lock   
+>>> d lock 
+0000  2c                                                |,               |
+
+avrdude> quit
+>>> quit 
+
+avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
+
+avrdude done.  Thank you.
+```
+
+At this moment, you can no longer update anything using Arduino GUI. The avrdude will happy read content of flash and EEPROM but content will be all 0xFF.
+
+
+### restore unprotected operation
+The only way to reverse conent of the lock register is to issue chip erase command. The chip erase command wipes out content of flash and EEPROM (if the EESAVE bit is inactive).
+
+```
+sudo avrdude -patmega32u4 -c avrisp -P/dev/ttyUSB0 -b19200 -t
+
+avrdude: AVR device initialized and ready to accept instructions
+
+Reading | ################################################## | 100% 0.02s
+
+avrdude: Device signature = 0x1e9587 (probably m32u4)
+avrdude> erase
+>>> erase 
+avrdude: erasing chip
+avrdude> quit
+>>> quit 
+
+avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
+
+avrdude done.  Thank you.
+```
+
+To restore normal operation, the original flash conent needs to be put back.
+
+```
+sudo avrdude -patmega32u4 -c avrisp -P/dev/ttyUSB0 -b19200 -D -U flash:w:flash.bin:r
+```
+
