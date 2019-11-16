@@ -74,17 +74,19 @@ However, with some effort you can protect access to EEPROM.
 
 First of all you need a ISP programmer. You can either buy one or [build one](https://www.arduino.cc/en/Tutorial/ArduinoISP) using spare Arduino.
 
+Please note, that default control pins for LCD overlap with ISP. For the time of programming LCD module must be disconnected.
+
 Once communication to lazy-password via ISP is established, it is time to do the real work.
 
-### Save content of flash
+#### Save content of flash
 ```
 sudo avrdude -v -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -U flash:r:eeprom.flash:r
 ```
-### Save content of EEPROM
+#### Save content of EEPROM
 ```
 sudo avrdude -v -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -U eeprom:r:eeprom.bin:r
 ```
-### Check the fuses
+#### Check the fuses
 ```
 sudo avrdude -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -t
 
@@ -148,10 +150,10 @@ avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
 avrdude done.  Thank you.
 ```
 
-At this moment, you can no longer update anything using Arduino GUI. The avrdude will happy read content of flash and EEPROM but content will be all 0xFF.
+At this moment, you can no longer update anything using Arduino GUI. The avrdude will happy read content of flash and EEPROM but all you will find is garbage.
 
 
-### restore unprotected operation
+#### restore unprotected operation
 The only way to reverse conent of the lock register is to issue chip erase command. The chip erase command wipes out content of flash and EEPROM (if the EESAVE bit is inactive).
 
 ```
@@ -173,7 +175,7 @@ avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
 avrdude done.  Thank you.
 ```
 
-To restore normal operation, the original flash conent needs to be put back.
+And the last step to recover to original Arduino functionaliy, put back the original flash conent.
 
 ```
 sudo avrdude -patmega32u4 -c avrisp -P/dev/ttyUSB0 -b19200 -D -U flash:w:flash.bin:r
