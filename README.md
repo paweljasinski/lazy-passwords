@@ -78,14 +78,6 @@ Please note, that default control pins for LCD overlap with ISP. For the time of
 
 Once communication to lazy-password via ISP is established, it is time to do the real work.
 
-#### Save content of flash
-```
-sudo avrdude -v -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -U flash:r:eeprom.flash:r
-```
-#### Save content of EEPROM
-```
-sudo avrdude -v -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -U eeprom:r:eeprom.bin:r
-```
 #### Check the fuses
 ```
 sudo avrdude -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -t
@@ -119,7 +111,7 @@ avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
 avrdude done.  Thank you.
 ```
 The board I have is clone, so some values can be different. The most important bit to check is EESAVE in hfuse. It has to be inactive (1). 
-At this moment it is also a good idea to write down value of lock register (0x2f).
+
 
 #### lock access to flash and EEPROM
 
@@ -150,7 +142,7 @@ avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
 avrdude done.  Thank you.
 ```
 
-At this moment, you can no longer update anything using Arduino GUI. The avrdude will happy read content of flash and EEPROM but all you will find is garbage.
+At this moment, you can no longer update anything using Arduino IDE.
 
 
 #### restore unprotected operation
@@ -175,9 +167,8 @@ avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
 avrdude done.  Thank you.
 ```
 
-And the last step to recover to original Arduino functionaliy, put back the original flash conent.
-
+And the last step to recover the original Arduino functionaliy. Start Arduino IDE
 ```
-sudo avrdude -patmega32u4 -c avrisp -P/dev/ttyUSB0 -b19200 -D -U flash:w:flash.bin:r
+Select Tools => Programmer: Arduino as ISP
+Select Tools => Burn Bootloader
 ```
-
