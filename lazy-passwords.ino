@@ -128,6 +128,16 @@ const byte DE_CH_LAYOUT = 1;
 byte layout; // track current layout
 
 
+/******************************************************************************
+
+    CAPS LOCK BUZZER
+
+*******************************************************************************/
+#define BUZZER A1
+#define ANALOG_KEYBOARD A0
+
+
+
 uint32_t now; // holds value returned by last call to millis
 
 /******************************************************************************
@@ -159,6 +169,10 @@ void setup() {
     pinMode(KEY, INPUT_PULLUP);
     attachInterrupt(INT_KEY, int2, CHANGE);
 
+    pinMode(BUZZER, OUTPUT);
+    digitalWrite(BUZZER, 0);
+
+    pinMode(ANALOG_KEYBOARD, INPUT);
 
     // initial content for rotary encoder
     int0signal = bitRead(PORT_A, PIN_A);
@@ -387,6 +401,7 @@ void loop() {
         process_shortcut_events();
         process_config_update();
         process_short_message_cleanup();
+        process_caps_lock();
     } else if (state == CHANGE_PIN_STATE) {
         change_pin_loop();
     } else {
@@ -394,6 +409,29 @@ void loop() {
     }
 }
 
+// any key on the LCD Keypad Shield can mute/unmute caps lock
+byte loud_caps_lock = 1; // should it be loud
+byte last_caps_mute = 0;
+void process_caps_lock() {
+    // state
+    if (analogRead(ANALOG_KEYBOARD) < 1000) {
+        if (! last_caps_mute) {
+            last_caps_mute = 1;
+            loud_caps_lock = ! loud_caps_lock;
+        }
+    } else {
+        last_caps_mute = 0;
+    }
+    // display
+    lcd.setCursor(7, 1);
+    if (Keyboard.getLedStatus() & LED_CAPS_LOCK) {
+        lcd.print("CAPS");
+        digitalWrite(BUZZER, loud_caps_lock);
+    } else {
+        lcd.print("    ");
+        digitalWrite(BUZZER, 0);
+    }
+}
 
 
 #ifdef INCLUDE_DUMP_EEPROM
