@@ -121,7 +121,7 @@ avrdude done.  Thank you.
 The board I have is clone, so some values can be different. The most important bit to check is EESAVE in hfuse. It has to be inactive (1). 
 At this moment it is also a good idea to write down value of lock register (0x2f).
 
-### lock access to flash and EEPROM
+#### lock access to flash and EEPROM
 
 ```
 sudo avrdude -patmega32u4 -c avrisp  -P/dev/ttyUSB0 -b19200 -t
