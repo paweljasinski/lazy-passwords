@@ -213,7 +213,13 @@ void eeprom_one_time_init() {
     EEPROM.write(addr++, 0xff); // PIN
     EEPROM.write(addr++, 0xff); // PIN
     EEPROM.write(addr++, 0x00); // PIN
-    EEPROM.write(addr++, EN_US_LAYOUT); // Keyboard layout
+    EEPROM.write(addr, EN_US_LAYOUT); // Keyboard layout
+    for (byte i = 0; i < N_PASS; i++) {
+        addr = LABEL_BASE_ADDR + i * LCD_COLS;
+        EEPROM.write(addr++, 'l');
+        EEPROM.write(addr++, '0' + i);
+        EEPROM.write(addr, '\0');
+    }
 }
 
 /******************************************************************************
