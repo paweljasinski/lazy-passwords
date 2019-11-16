@@ -72,9 +72,9 @@ You have to apply HID and Keyboard patches before sketch can be compiled and upl
 The passwords are stored unprotected in EEPROM and can be dumped using standard atmega tools.
 However, with some effort you can protect access to EEPROM.
 
-First of all you need a ISP programmer. You can either buy one or [build one](https://www.arduino.cc/en/Tutorial/ArduinoISP) using spare Arduino.
+First of all you need an ISP programmer. You can either buy one or [build one](https://www.arduino.cc/en/Tutorial/ArduinoISP) using spare Arduino.
 
-Please note, that default control pins for LCD overlap with ISP. For the time of programming LCD module must be disconnected.
+Please note, that default control pins of LCD module overlap with ISP. During programming LCD module must be disconnected.
 
 Once communication to lazy-password via ISP is established, it is time to do the real work.
 
@@ -167,7 +167,7 @@ avrdude: safemode: Fuses OK (E:CB, H:D8, L:FF)
 avrdude done.  Thank you.
 ```
 
-And the last step to recover the original Arduino functionaliy. Start Arduino IDE
+And the last step to recover the original Arduino functionaliy. Start Arduino IDE and:
 ```
 Select Tools => Programmer: Arduino as ISP
 Select Tools => Burn Bootloader
